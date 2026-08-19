@@ -121,6 +121,7 @@ var LOCKED_DOWN = {
     // LOCKED_DOWN default: false like everything else here. The seeded policy
     // turns it on; this constant is what applies when policy cannot be loaded.
     filterOwnRooms: false,
+    pressBotButtons: false,
     viewMemberList: false,
     bridgeCommands: false,
     forwardMessages: false,
@@ -301,6 +302,138 @@ var Watermark = class {
   }
 };
 
+// src/buttons.ts
+var BUTTONS_FIELD = "com.company.telegram.buttons";
+var PRESS_EVENT = "com.company.telegram.button_press";
+function descriptorsOf(ev) {
+  const e = ev;
+  try {
+    const raw = e?.getContent?.()[BUTTONS_FIELD];
+    if (!Array.isArray(raw)) return [];
+    return raw.filter(
+      (b) => !!b && typeof b.row === "number" && typeof b.col === "number" && typeof b.label === "string"
+    );
+  } catch {
+    return [];
+  }
+}
+function matrixClient(api, roomId) {
+  try {
+    if (roomId) {
+      const room = api?.client?.getRoom?.(roomId);
+      if (room?.client?.sendEvent) return room.client;
+    }
+  } catch {
+  }
+  try {
+    const peg = globalThis.mxMatrixClientPeg;
+    const client = peg?.safeGet?.() ?? peg?.get?.();
+    if (client?.sendEvent) return client;
+  } catch {
+  }
+  return void 0;
+}
+var ButtonPressRenderer = class {
+  constructor(api, client) {
+    this.api = api;
+    this.client = client;
+    __publicField(this, "inFlight", /* @__PURE__ */ new Set());
+  }
+  register() {
+    const cc = this.api.customComponents;
+    if (!cc?.registerMessageRenderer) return;
+    cc.registerMessageRenderer(
+      (ev) => descriptorsOf(ev).length > 0,
+      (props, original) => this.render(props, original)
+    );
+  }
+  render(props, original) {
+    const React = globalThis.React;
+    if (!React?.createElement) return original?.();
+    const ev = props?.mxEvent;
+    const descriptors = descriptorsOf(ev);
+    const roomId = ev?.getRoomId?.();
+    const eventId = ev?.getId?.();
+    const allowed = this.client.policy?.features?.pressBotButtons === true;
+    const buttons = descriptors.map((b) => {
+      const pressable = allowed && b.kind === "callback" && !!roomId && !!eventId;
+      const key = `${eventId}:${b.row}:${b.col}`;
+      return React.createElement(
+        "button",
+        {
+          key,
+          type: "button",
+          disabled: !pressable || this.inFlight.has(key),
+          title: pressable ? "Press this bot button" : b.kind === "callback" ? "Pressing bot buttons is not enabled for your role" : `${b.kind} buttons cannot be pressed from here`,
+          style: {
+            margin: "2px 4px 2px 0",
+            padding: "2px 8px",
+            borderRadius: "4px",
+            border: "1px solid var(--cpd-color-border-interactive-primary, #888)",
+            background: "transparent",
+            color: "inherit",
+            cursor: pressable ? "pointer" : "default",
+            opacity: pressable ? 1 : 0.55,
+            font: "inherit"
+          },
+          onClick: pressable ? () => this.press(roomId, eventId, b, key) : void 0
+        },
+        b.label
+      );
+    });
+    return React.createElement(
+      "div",
+      null,
+      original?.(),
+      React.createElement("div", { style: { marginTop: "4px" } }, buttons)
+    );
+  }
+  press(roomId, eventId, b, key) {
+    const client = matrixClient(this.api, roomId);
+    if (!client) {
+      this.client.audit({
+        eventType: "BUTTON_PRESS",
+        conversationId: roomId,
+        messageId: eventId,
+        targetType: "telegram_button",
+        targetId: `${b.row},${b.col}`,
+        result: "FAILED",
+        metadata: { reason: "no matrix client available" }
+      });
+      return;
+    }
+    if (this.inFlight.has(key)) return;
+    this.inFlight.add(key);
+    client.sendEvent(roomId, PRESS_EVENT, {
+      "m.relates_to": { event_id: eventId },
+      row: b.row,
+      col: b.col
+    }).then(() => {
+      this.client.audit({
+        eventType: "BUTTON_PRESS",
+        conversationId: roomId,
+        messageId: eventId,
+        targetType: "telegram_button",
+        targetId: `${b.row},${b.col}`,
+        result: "ALLOWED",
+        metadata: { kind: b.kind }
+      });
+    }).catch((err) => {
+      this.client.audit({
+        eventType: "BUTTON_PRESS",
+        conversationId: roomId,
+        messageId: eventId,
+        targetType: "telegram_button",
+        targetId: `${b.row},${b.col}`,
+        result: "FAILED",
+        metadata: { reason: String(err).slice(0, 200) }
+      });
+    }).finally(() => {
+      setTimeout(() => this.inFlight.delete(key), 2e3);
+    });
+  }
+};
+
 // src/index.ts
 var CONFIG_KEY = "company_policy";
 var UIComponent = {
@@ -332,6 +465,7 @@ var CompanyPolicyModule = class {
     this.clipboard = new ClipboardGuard(this.client);
     this.registerFeatureGates();
     this.registerMediaPolicy();
+    new ButtonPressRenderer(this.api, this.client).register();
     this.watermark.apply(LOCKED_DOWN, null);
     this.clipboard.apply(LOCKED_DOWN);
     this.api.profile?.watch((p) => {

@@ -18,6 +18,7 @@
 import { ClipboardGuard } from "./clipboard";
 import { LOCKED_DOWN, PolicyClient } from "./policy";
 import { Watermark } from "./watermark";
+import { ButtonPressRenderer } from "./buttons";
 
 const CONFIG_KEY = "company_policy";
 
@@ -102,6 +103,9 @@ export class CompanyPolicyModule implements Module {
 
         this.registerFeatureGates();
         this.registerMediaPolicy();
+        // Pressable bot buttons. Drawing only — the bridge's pressable_bot_ids
+        // allowlist is what decides whether a press is carried out.
+        new ButtonPressRenderer(this.api, this.client).register();
 
         // Apply the locked-down policy IMMEDIATELY. `load()` runs before the Matrix
         // client exists, so there is no token yet and no policy can be fetched —

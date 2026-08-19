@@ -53,6 +53,16 @@ export interface ClientPolicy {
          * this flag. Client shows, server decides.
          */
         filterOwnRooms: boolean;
+        /**
+         * Draw bot inline-keyboard buttons as pressable.
+         *
+         * CLIENT-SIDE ONLY, and the weaker half of the control. It decides whether
+         * the buttons are drawn as pressable; the bridge's pressable_bot_ids
+         * allowlist decides whether a press is actually carried out. Turning this on
+         * does not make any button work, and turning it off does not make the bridge
+         * accept anything it would otherwise refuse.
+         */
+        pressBotButtons: boolean;
         viewMemberList: boolean;
         bridgeCommands: boolean;
         forwardMessages: boolean;
@@ -123,6 +133,7 @@ export const LOCKED_DOWN: ClientPolicy = {
         // LOCKED_DOWN default: false like everything else here. The seeded policy
         // turns it on; this constant is what applies when policy cannot be loaded.
         filterOwnRooms: false,
+        pressBotButtons: false,
         viewMemberList: false,
         bridgeCommands: false,
         forwardMessages: false,
