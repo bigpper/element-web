@@ -17,7 +17,6 @@ import { type Command, CommandCategories, getCommand } from "../slash-commands/S
 import { UserFriendlyError, _t, _td } from "../languageHandler";
 import Modal from "../Modal";
 import ErrorDialog from "../components/views/dialogs/ErrorDialog";
-import QuestionDialog from "../components/views/dialogs/QuestionDialog";
 
 export function isSlashCommand(model: EditorModel): boolean {
     const parts = model.parts;
@@ -106,34 +105,23 @@ export async function runSlashCommand(
 }
 
 export async function shouldSendAnyway(commandText: string): Promise<boolean> {
-    // ask the user if their unknown command should be sent as a message
-    const { finished } = Modal.createDialog(QuestionDialog, {
-        title: _t("slash_command|unknown_command"),
-        description: (
-            <div>
-                <p>{_t("slash_command|unknown_command_detail", { commandText })}</p>
-                <p>
-                    {_t(
-                        "slash_command|unknown_command_help",
-                        {},
-                        {
-                            code: (t) => <code>{t}</code>,
-                        },
-                    )}
-                </p>
-                <p>
-                    {_t(
-                        "slash_command|unknown_command_hint",
-                        {},
-                        {
-                            code: (t) => <code>{t}</code>,
-                        },
-                    )}
-                </p>
-            </div>
-        ),
-        button: _t("slash_command|unknown_command_button"),
-    });
-    const [sendAnyway] = await finished;
-    return sendAnyway || false;
+    // COMPANY PATCH — see docs/upstream-element-changes.md in the platform repo.
+    //
+    // Upstream asks the user to confirm before sending an unrecognised /command as
+    // an ordinary message. Agents here talk to Telegram bots, whose commands
+    // (/start, /help, /balance ...) are not and cannot be Element commands, so that
+    // confirmation fired on every single bot interaction.
+    //
+    // Patched here rather than at the three call sites (SendMessageComposer,
+    // EditMessageComposer, wysiwyg) so the behaviour stays consistent and a rebase
+    // onto a new Element only has one place to resolve.
+    //
+    // Known cost, accepted deliberately: a typo of a REAL Element command is no
+    // longer caught. `/mee hello` now goes to the customer as text instead of being
+    // stopped. Most Element commands are already disabled for agents in this
+    // deployment, which is what makes the trade worth it — it would not be on a
+    // general-purpose Element.
+    //
+    // `//command` still works as the upstream escape and is unaffected.
+    return true;
 }
