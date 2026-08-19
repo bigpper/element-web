@@ -1,0 +1,8 @@
+{
+    "name": "company-policy",
+    "private": true,
+    "version": "1.0.0",
+    "type": "module",
+    "main": "index.js",
+    "description": "Company security policy for the agent client: watermark, clipboard, media and feature gating."
+}
