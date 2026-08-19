@@ -19,7 +19,18 @@ WORKDIR /src
 
 # Install dependencies
 COPY --parents package.json pnpm-lock.yaml pnpm-workspace.yaml patches scripts **/package.json /src/
-RUN pnpm install --frozen-lockfile
+# COMPANY PATCH — build infrastructure only, no effect on the produced app.
+# The default 60s fetch timeout is not survivable on a slow link to
+# registry.npmjs.org: this install pulls ~2400 packages and died with
+# "TimeoutError: The operation was aborted due to timeout" after 8m of
+# sub-50 KiB/s downloads. Timeout and retries raised; the registry is
+# deliberately NOT changed — routing the dependency tree through a third-party
+# mirror is a supply-chain decision, not a speed tweak, and this Dockerfile
+# runs supply-chain policy checks on the lockfile for a reason.
+RUN pnpm install --frozen-lockfile \
+    --fetch-timeout 600000 \
+    --fetch-retries 5 \
+    --fetch-retry-maxtimeout 120000
 RUN --mount=type=bind,source=.git,target=/src/.git /src/scripts/docker-link-repos.sh
 
 # Build
