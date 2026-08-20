@@ -434,6 +434,51 @@ var ButtonPressRenderer = class {
   }
 };
 
+// src/widgets.ts
+var PREAPPROVED = /* @__PURE__ */ new Set(["m.always_on_screen"]);
+function originOf(url) {
+  if (typeof url !== "string") return null;
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
+var WidgetPolicy = class {
+  constructor(api, client) {
+    this.api = api;
+    this.client = client;
+  }
+  register() {
+    const reg = this.api?.legacyCustomisations?._registerLegacyWidgetPermissionsCustomisations;
+    if (typeof reg !== "function") return;
+    reg({
+      preapproveCapabilities: async (widget, requested) => {
+        const allowed = this.client.policy?.widgets?.trustedOrigins ?? [];
+        const origin = originOf(widget?.url ?? widget?.templateUrl);
+        if (!origin || !allowed.includes(origin)) {
+          return /* @__PURE__ */ new Set();
+        }
+        const granted = /* @__PURE__ */ new Set();
+        for (const cap of requested) {
+          if (PREAPPROVED.has(cap)) granted.add(cap);
+        }
+        const withheld = [...requested].filter((c) => !granted.has(c));
+        if (withheld.length > 0) {
+          this.client.audit({
+            eventType: "WIDGET_CAPABILITY_WITHHELD",
+            targetType: "widget",
+            targetId: origin,
+            result: "BLOCKED",
+            metadata: { withheld }
+          });
+        }
+        return granted;
+      }
+    });
+  }
+};
+
 // src/index.ts
 var CONFIG_KEY = "company_policy";
 var UIComponent = {
@@ -466,6 +511,7 @@ var CompanyPolicyModule = class {
     this.registerFeatureGates();
     this.registerMediaPolicy();
     new ButtonPressRenderer(this.api, this.client).register();
+    new WidgetPolicy(this.api, this.client).register();
     this.watermark.apply(LOCKED_DOWN, null);
     this.clipboard.apply(LOCKED_DOWN);
     this.api.profile?.watch((p) => {

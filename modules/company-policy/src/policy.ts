@@ -69,6 +69,14 @@ export interface ClientPolicy {
         exportConversation: boolean;
         developerTools: boolean;
     };
+    widgets: {
+        /**
+         * Origins whose widgets may skip the capability prompt. Origins, not widget
+         * IDs or names: a room member with power can name a widget anything, but the
+         * URL is what actually determines whose page loads.
+         */
+        trustedOrigins: string[];
+    };
     watermark: {
         enabled: boolean;
         template: string;
