@@ -14,6 +14,8 @@ import VoiceCallIcon from "@vector-im/compound-design-tokens/assets/web/icons/vo
 import CloseCallIcon from "@vector-im/compound-design-tokens/assets/web/icons/close";
 import ThreadsIcon from "@vector-im/compound-design-tokens/assets/web/icons/threads-solid";
 import RoomInfoIcon from "@vector-im/compound-design-tokens/assets/web/icons/info-solid";
+// COMPANY PATCH: icon for the provisioned customer panel button below.
+import ExtensionsIcon from "@vector-im/compound-design-tokens/assets/web/icons/extensions";
 import NotificationsIcon from "@vector-im/compound-design-tokens/assets/web/icons/notifications-solid";
 import VerifiedIcon from "@vector-im/compound-design-tokens/assets/web/icons/verified";
 import ErrorIcon from "@vector-im/compound-design-tokens/assets/web/icons/error-solid";
@@ -36,6 +38,7 @@ import { useEncryptionStatus } from "../../../../hooks/useEncryptionStatus.ts";
 import { E2EStatus } from "../../../../utils/ShieldUtils.ts";
 import FacePile from "../../elements/FacePile.tsx";
 import { useRoomState } from "../../../../hooks/useRoomState.ts";
+import WidgetStore from "../../../../stores/WidgetStore";
 import RoomAvatar from "../../avatars/RoomAvatar.tsx";
 import { formatCount } from "../../../../utils/FormattingUtils.ts";
 import PosthogTrackers from "../../../../PosthogTrackers.ts";
@@ -91,6 +94,19 @@ function RoomHeaderButtons({
     const isDirectMessage = !!dmMember;
 
     const notificationsEnabled = useFeatureEnabled("feature_notifications");
+
+    // COMPANY PATCH — the provisioned customer panel, for the header button below.
+    //
+    // Recomputed from room state rather than cached: a widget can be installed or
+    // removed while the room is open, and a stale button would either be dead or
+    // missing. `useRoomState` already re-renders this component on state changes.
+    //
+    // Virtual widgets (Jitsi call tiles and similar) are excluded — they are not
+    // panels and Element manages their surface itself.
+    const companyPanelWidget = useRoomState(room, () => {
+        const apps = WidgetStore.instance.getApps(room.roomId).filter((w) => !w.eventId?.startsWith("$virtual"));
+        return apps.length > 0 ? apps[0] : undefined;
+    });
 
     const videoClick = useCallback(
         (ev: React.MouseEvent) => videoCallClick(ev, callOptions[0]),
@@ -357,6 +373,36 @@ function RoomHeaderButtons({
                         aria-label={_t("notifications|enable_prompt_toast_title")}
                     >
                         <ToggleableIcon Icon={NotificationsIcon} phase={RightPanelPhases.NotificationPanel} />
+                    </IconButton>
+                </Tooltip>
+            )}
+
+            {/*
+                COMPANY PATCH — see docs/upstream-element-changes.md in the platform repo.
+
+                A one-click way to open the provisioned customer panel, beside the
+                threads and room-info buttons.
+
+                Upstream surfaces a room widget only through room info -> Extensions
+                -> click, which is three interactions for the thing an agent needs
+                open in every conversation. Pinning it instead (container "top") puts
+                it permanently above the composer and costs timeline height.
+
+                Only rendered when the room actually has a widget, so rooms without
+                one look exactly as upstream does.
+            */}
+            {companyPanelWidget && (
+                <Tooltip label={companyPanelWidget.name || _t("common|widget")}>
+                    <IconButton
+                        onClick={(evt) => {
+                            evt.stopPropagation();
+                            sdkContext.rightPanelStore.showOrHidePhase(RightPanelPhases.Widget, {
+                                widgetId: companyPanelWidget.id,
+                            });
+                        }}
+                        aria-label={companyPanelWidget.name || _t("common|widget")}
+                    >
+                        <ToggleableIcon Icon={ExtensionsIcon} phase={RightPanelPhases.Widget} />
                     </IconButton>
                 </Tooltip>
             )}
