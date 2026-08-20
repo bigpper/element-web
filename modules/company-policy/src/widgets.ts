@@ -1,41 +1,47 @@
 /**
- * Pre-approve capabilities for the company's own provisioned widget.
+ * Consent policy for the company's own provisioned widget panel.
  *
- * Element asks the agent to approve a widget's requested capabilities the first time
- * it loads. For a widget an administrator installed into every conversation, that is
- * a prompt on every room for every agent, about a decision they were never in a
- * position to make.
+ * Element gates a widget three times before it can do anything useful, and a panel an
+ * administrator installed into every conversation hits all three in every room, each
+ * time asking the agent about a decision they were never in a position to make:
  *
- * SCOPED ON PURPOSE, TWICE OVER.
+ *   1. PRELOAD  — "Continue" before the iframe loads at all.
+ *   2. IDENTITY — a prompt before Element will issue an OpenID token. Without this
+ *                 one answered, `requestOpenIDConnectToken()` in the widget simply
+ *                 times out (ElementWidgetDriver.askOpenID falls through to
+ *                 PendingUserConfirmation), which looks like a broken panel rather
+ *                 than an unanswered question.
+ *   3. CAPABILITIES — what the widget may do inside the room.
  *
- * Approval is granted only to widgets whose URL origin is on an allowlist delivered
- * with the policy — not to widgets by name or ID, which a room member with power
- * could set to anything, and never to widgets in general. An agent who somehow gets
- * a widget of their own into a room still gets the normal prompt.
+ * SCOPED BY ORIGIN, NOT BY NAME.
  *
- * And the only capability pre-approved is `m.always_on_screen`, which keeps the
- * panel from being torn down as the agent moves around. Everything else — reading
- * timeline events, sending on the user's behalf, room state — is left to the prompt,
- * because those are the capabilities that would let a third-party page act inside
- * the conversation rather than merely sit beside it.
+ * Every approval below is keyed on `widget.origin`. A widget's id, name and type are
+ * chosen by whoever wrote the room state, and in a room where an agent holds power
+ * they could be set to anything; the origin is what determines whose page actually
+ * loads. Origins come from the policy (`widgets.trustedOrigins`), which is server-
+ * delivered — a browser-side edit of the policy grants nothing, because the widget
+ * still has to satisfy the management API to learn anything.
  *
- * The widget proves WHO is looking at it through the OpenID exchange
- * (docs/widget-integration.md), which needs no Element capability at all. That is
- * why this list can stay this short.
+ * WHAT IS NOT AUTO-APPROVED.
+ *
+ * Capabilities stay minimal: only `m.always_on_screen`. Reading timeline events,
+ * sending on the agent's behalf and room state are left to the prompt, because those
+ * are what let a third-party page act INSIDE the conversation rather than sit beside
+ * it. The identity exchange needs no capability at all, which is what makes such a
+ * short list workable.
  */
 
 import type { CompanyPolicyClient } from "./policy";
 
-/** Capabilities safe to grant a provisioned panel without asking. */
+/** Capabilities a provisioned panel may have without asking. */
 const PREAPPROVED = new Set<string>(["m.always_on_screen"]);
 
-function originOf(url: unknown): string | null {
-    if (typeof url !== "string") return null;
-    try {
-        return new URL(url).origin;
-    } catch {
-        return null;
-    }
+interface WidgetDescriptor {
+    id?: string;
+    templateUrl?: string;
+    origin?: string;
+    type?: string;
+    roomId?: string;
 }
 
 export class WidgetPolicy {
@@ -44,39 +50,69 @@ export class WidgetPolicy {
         private readonly client: CompanyPolicyClient,
     ) {}
 
+    private trusted(widget: WidgetDescriptor | undefined): boolean {
+        const allowed = this.client.policy?.widgets?.trustedOrigins ?? [];
+        const origin = widget?.origin ?? originOf(widget?.templateUrl);
+        return !!origin && allowed.includes(origin);
+    }
+
     public register(): void {
-        const reg = this.api?.legacyCustomisations?._registerLegacyWidgetPermissionsCustomisations;
-        if (typeof reg !== "function") return;
+        const lifecycle = this.api?.widgetLifecycle;
+        if (!lifecycle) return;
 
-        reg({
-            preapproveCapabilities: async (widget: any, requested: Set<string>) => {
-                const allowed = this.client.policy?.widgets?.trustedOrigins ?? [];
-                const origin = originOf(widget?.url ?? widget?.templateUrl);
-                if (!origin || !allowed.includes(origin)) {
-                    // Not ours. Return nothing and let Element ask the agent.
-                    return new Set<string>();
-                }
+        // 1. Load without a "Continue" click.
+        lifecycle.registerPreloadApprover?.((widget: WidgetDescriptor) =>
+            this.trusted(widget) ? true : undefined,
+        );
 
-                const granted = new Set<string>();
-                for (const cap of requested) {
-                    if (PREAPPROVED.has(cap)) granted.add(cap);
-                }
-
-                const withheld = [...requested].filter((c) => !granted.has(c));
-                if (withheld.length > 0) {
-                    // Worth an audit line: a provisioned widget asking for more than
-                    // a panel needs is a change in what the host system is doing, and
-                    // nobody would otherwise notice it happening.
-                    this.client.audit({
-                        eventType: "WIDGET_CAPABILITY_WITHHELD",
-                        targetType: "widget",
-                        targetId: origin,
-                        result: "BLOCKED",
-                        metadata: { withheld },
-                    });
-                }
-                return granted;
-            },
+        // 2. Issue an OpenID token without prompting.
+        //
+        // This is the consequential one: it lets the panel learn WHICH AGENT is
+        // viewing it, silently. That is the entire purpose of the integration, and
+        // the identity disclosed is the agent's own — never a customer's — but it
+        // happens without the agent being asked, so it is audited.
+        lifecycle.registerIdentityApprover?.((widget: WidgetDescriptor) => {
+            if (!this.trusted(widget)) return undefined;
+            this.client.audit({
+                eventType: "WIDGET_IDENTITY_DISCLOSED",
+                conversationId: widget.roomId,
+                targetType: "widget",
+                targetId: widget.origin,
+                result: "ALLOWED",
+            });
+            return true;
         });
+
+        // 3. Capabilities — the short list, and a record of anything refused.
+        lifecycle.registerCapabilitiesApprover?.((widget: WidgetDescriptor, requested: Set<string>) => {
+            if (!this.trusted(widget)) return undefined;
+
+            const granted = new Set<string>();
+            for (const cap of requested) if (PREAPPROVED.has(cap)) granted.add(cap);
+
+            const withheld = [...requested].filter((c) => !granted.has(c));
+            if (withheld.length > 0) {
+                // A provisioned panel asking for more than a panel needs is a change
+                // in what the host system does, and nobody would otherwise notice.
+                this.client.audit({
+                    eventType: "WIDGET_CAPABILITY_WITHHELD",
+                    conversationId: widget.roomId,
+                    targetType: "widget",
+                    targetId: widget.origin,
+                    result: "BLOCKED",
+                    metadata: { withheld },
+                });
+            }
+            return granted;
+        });
+    }
+}
+
+function originOf(url: unknown): string | null {
+    if (typeof url !== "string") return null;
+    try {
+        return new URL(url).origin;
+    } catch {
+        return null;
     }
 }

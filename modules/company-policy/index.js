@@ -436,6 +436,52 @@ var ButtonPressRenderer = class {
 
 // src/widgets.ts
 var PREAPPROVED = /* @__PURE__ */ new Set(["m.always_on_screen"]);
+var WidgetPolicy = class {
+  constructor(api, client) {
+    this.api = api;
+    this.client = client;
+  }
+  trusted(widget) {
+    const allowed = this.client.policy?.widgets?.trustedOrigins ?? [];
+    const origin = widget?.origin ?? originOf(widget?.templateUrl);
+    return !!origin && allowed.includes(origin);
+  }
+  register() {
+    const lifecycle = this.api?.widgetLifecycle;
+    if (!lifecycle) return;
+    lifecycle.registerPreloadApprover?.(
+      (widget) => this.trusted(widget) ? true : void 0
+    );
+    lifecycle.registerIdentityApprover?.((widget) => {
+      if (!this.trusted(widget)) return void 0;
+      this.client.audit({
+        eventType: "WIDGET_IDENTITY_DISCLOSED",
+        conversationId: widget.roomId,
+        targetType: "widget",
+        targetId: widget.origin,
+        result: "ALLOWED"
+      });
+      return true;
+    });
+    lifecycle.registerCapabilitiesApprover?.((widget, requested) => {
+      if (!this.trusted(widget)) return void 0;
+      const granted = /* @__PURE__ */ new Set();
+      for (const cap of requested) if (PREAPPROVED.has(cap)) granted.add(cap);
+      const withheld = [...requested].filter((c) => !granted.has(c));
+      if (withheld.length > 0) {
+        this.client.audit({
+          eventType: "WIDGET_CAPABILITY_WITHHELD",
+          conversationId: widget.roomId,
+          targetType: "widget",
+          targetId: widget.origin,
+          result: "BLOCKED",
+          metadata: { withheld }
+        });
+      }
+      return granted;
+    });
+  }
+};
 function originOf(url) {
   if (typeof url !== "string") return null;
   try {
@@ -444,40 +490,6 @@ function originOf(url) {
     return null;
   }
 }
-var WidgetPolicy = class {
-  constructor(api, client) {
-    this.api = api;
-    this.client = client;
-  }
-  register() {
-    const reg = this.api?.legacyCustomisations?._registerLegacyWidgetPermissionsCustomisations;
-    if (typeof reg !== "function") return;
-    reg({
-      preapproveCapabilities: async (widget, requested) => {
-        const allowed = this.client.policy?.widgets?.trustedOrigins ?? [];
-        const origin = originOf(widget?.url ?? widget?.templateUrl);
-        if (!origin || !allowed.includes(origin)) {
-          return /* @__PURE__ */ new Set();
-        }
-        const granted = /* @__PURE__ */ new Set();
-        for (const cap of requested) {
-          if (PREAPPROVED.has(cap)) granted.add(cap);
-        }
-        const withheld = [...requested].filter((c) => !granted.has(c));
-        if (withheld.length > 0) {
-          this.client.audit({
-            eventType: "WIDGET_CAPABILITY_WITHHELD",
-            targetType: "widget",
-            targetId: origin,
-            result: "BLOCKED",
-            metadata: { withheld }
-          });
-        }
-        return granted;
-      }
-    });
-  }
-};
 
 // src/index.ts
 var CONFIG_KEY = "company_policy";
