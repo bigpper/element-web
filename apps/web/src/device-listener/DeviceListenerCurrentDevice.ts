@@ -25,6 +25,7 @@ import {
     showToast as showSetupEncryptionToast,
 } from "../toasts/SetupEncryptionToast";
 import { isSecretStorageBeingAccessed } from "../SecurityManager";
+import { shouldSkipSetupEncryption } from "../utils/crypto/shouldSkipSetupEncryption";
 
 const KEY_BACKUP_POLL_INTERVAL = 5 * 60 * 1000;
 
@@ -169,6 +170,35 @@ export class DeviceListenerCurrentDevice {
     public async recheck(logSpan: LogSpan): Promise<void> {
         const crypto = this.client.getCrypto();
         if (!crypto) {
+            return;
+        }
+
+        // COMPANY CHANGE: say nothing when encryption is off for this deployment.
+        //
+        // Every check below asks a version of "is this device cross-signed, and are its
+        // keys backed up" — questions that only matter if there is encrypted content
+        // whose keys need protecting. shouldSkipSetupEncryption() is Element's own
+        // predicate for exactly that, already used in MatrixChat to skip the full-screen
+        // setup gate: well-known sets io.element.e2ee.force_disable AND the user is in no
+        // encrypted rooms. Both hold here, so the gate is skipped but this toast still
+        // appeared, nagging about a device state that cannot be improved and does not
+        // matter. Element deciding the setup flow is unnecessary and then nagging about
+        // its outcome is not two decisions; it is one decision applied in one place.
+        //
+        // Nothing is being hidden: the checks below are advisory UI, not enforcement. A
+        // room that is encrypted still behaves as an encrypted room, and if one ever
+        // appears the predicate turns false and the toast returns on its own.
+        // getClientWellKnown() is populated asynchronously and returns undefined until the
+        // fetch lands, so shouldForceDisableEncryption() — which reads it synchronously —
+        // silently answers "not disabled" if we ask too early. That made this check a
+        // race: it passed while the client was slow and started failing once a CDN made
+        // the bundle load fast enough to beat the well-known request. CallStore does the
+        // same wait before reading well-known, for the same reason.
+        await this.client.waitForClientWellKnown();
+
+        if (await shouldSkipSetupEncryption(this.client)) {
+            logSpan.info("Encryption is force-disabled and no rooms are encrypted: no toast needed");
+            this.setDeviceState("ok", logSpan);
             return;
         }
 
