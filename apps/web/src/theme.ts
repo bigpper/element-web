@@ -318,6 +318,12 @@ export function getCustomTheme(themeName: string): CustomTheme {
  *
  * @param {string} theme new theme
  */
+// How long to wait for a theme stylesheet before treating it as failed. 30 seconds, not the
+// 2 seconds upstream allowed: see the rejection site below for why this is a ceiling on
+// pathology rather than a performance budget.
+const STYLESHEET_POLL_MS = 200;
+const STYLESHEET_LOAD_TICKS = 150;
+
 export async function setTheme(theme?: string): Promise<void> {
     if (!theme) {
         const themeWatcher = new ThemeWatcher();
@@ -414,13 +420,35 @@ export async function setTheme(theme?: string): Promise<void> {
                     switchTheme();
                 }
 
-                // Avoid to be stuck in an endless loop if there is an issue in the stylesheet loading
+                // Avoid to be stuck in an endless loop if there is an issue in the stylesheet loading.
+                //
+                // COMPANY CHANGE: upstream gave up after 10 ticks (2 seconds) and rejected with
+                // no argument at all. Both halves of that were wrong for us.
+                //
+                // The budget: theme-light.css is 578 KB (87 KB gzipped) and is fetched at the same
+                // time as the multi-megabyte app bundle, so on a link that is merely slow rather
+                // than broken it does not finish inside 2 seconds. This interval is only a
+                // workaround for Chrome not firing `load` when a stylesheet is re-selected — a
+                // genuine failure arrives on `onerror` below and rejects immediately — so a long
+                // ceiling costs nothing and a short one turns a slow network into a dead app.
+                //
+                // The argument: `reject()` produced a rejection value of `undefined`, which
+                // start() logs as the literal text "undefined" and then reports to the agent as
+                // "Element 配置错误" — a configuration error, for a configuration that is correct.
+                // That message sent us looking at config.json for a long time.
                 counter++;
-                if (counter === 10) {
+                if (counter === STYLESHEET_LOAD_TICKS) {
                     clearInterval(intervalId);
-                    reject();
+                    styleSheet.onload = null;
+                    styleSheet.onerror = null;
+                    reject(
+                        new Error(
+                            `Timed out after ${(STYLESHEET_LOAD_TICKS * STYLESHEET_POLL_MS) / 1000}s ` +
+                                `waiting for theme stylesheet ${styleSheet.href} to load`,
+                        ),
+                    );
                 }
-            }, 200);
+            }, STYLESHEET_POLL_MS);
 
             styleSheet.onload = () => {
                 clearInterval(intervalId);
