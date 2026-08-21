@@ -583,6 +583,13 @@
         "view_message": "View message",
         "warning": "Warning"
     },
+    "company": {
+        "customer_panel": {
+            "title": "Customer",
+            "not_configured": "No customer information is configured for this room.",
+            "not_configured_hint": "An administrator can set the page to open here under Customer Panel in the admin console."
+        }
+    },
     "composer": {
         "autocomplete": {
             "@room_description": "Notify the whole room",

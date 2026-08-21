@@ -26,6 +26,7 @@ import {
 } from "../toasts/SetupEncryptionToast";
 import { isSecretStorageBeingAccessed } from "../SecurityManager";
 import { shouldSkipSetupEncryption } from "../utils/crypto/shouldSkipSetupEncryption";
+import { shouldForceDisableEncryption } from "../utils/crypto/shouldForceDisableEncryption";
 
 const KEY_BACKUP_POLL_INTERVAL = 5 * 60 * 1000;
 
@@ -194,9 +195,23 @@ export class DeviceListenerCurrentDevice {
         // race: it passed while the client was slow and started failing once a CDN made
         // the bundle load fast enough to beat the well-known request. CallStore does the
         // same wait before reading well-known, for the same reason.
-        await this.client.waitForClientWellKnown();
+        // waitForClientWellKnown() throws — not rejects-late — if the client is not
+        // running, so swallow that: an unavailable well-known should leave the checks
+        // below to run normally, not abort the whole recheck.
+        await this.client.waitForClientWellKnown().catch(() => undefined);
 
-        if (await shouldSkipSetupEncryption(this.client)) {
+        // Both sub-conditions are logged because when this check fails it fails
+        // silently, and "no toast appeared" and "the check never ran" look identical
+        // from the outside. Diagnosing it once without this cost a rebuild-and-deploy
+        // cycle per hypothesis, over a link where each cycle is expensive.
+        const forceDisabled = shouldForceDisableEncryption(this.client);
+        const skip = await shouldSkipSetupEncryption(this.client);
+        logSpan.info(
+            `encryption-disabled check: forceDisabled=${forceDisabled} skip=${skip} ` +
+                `wellKnownKeys=[${Object.keys(this.client.getClientWellKnown() ?? {}).join(",")}]`,
+        );
+
+        if (skip) {
             logSpan.info("Encryption is force-disabled and no rooms are encrypted: no toast needed");
             this.setDeviceState("ok", logSpan);
             return;

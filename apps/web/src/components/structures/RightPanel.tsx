@@ -17,6 +17,8 @@ import RightPanelStore from "../../stores/right-panel/RightPanelStore";
 import MatrixClientContext from "../../contexts/MatrixClientContext";
 import RoomSummaryCardView from "../views/right_panel/RoomSummaryCardView";
 import WidgetCard from "../views/right_panel/WidgetCard";
+// COMPANY PATCH: customer panel empty state.
+import CustomerPanelEmptyCard from "../views/right_panel/CustomerPanelEmptyCard";
 import UserInfo from "../views/right_panel/UserInfo";
 import ThirdPartyMemberInfo from "../views/rooms/ThirdPartyMemberInfo";
 import FilePanel from "./FilePanel";
@@ -276,6 +278,11 @@ export default class RightPanel extends React.Component<Props, IState> {
                 if (!!this.props.room && !!cardState?.widgetId) {
                     card = <WidgetCard room={this.props.room} widgetId={cardState.widgetId} onClose={this.onClose} />;
                 }
+                break;
+
+            // COMPANY PATCH: the customer panel's empty state. See the component.
+            case RightPanelPhases.CustomerPanel:
+                card = <CustomerPanelEmptyCard onClose={this.onClose} />;
                 break;
         }
 

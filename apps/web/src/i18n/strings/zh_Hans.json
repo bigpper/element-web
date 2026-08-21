@@ -583,6 +583,13 @@
         "view_message": "查看消息",
         "warning": "警告"
     },
+    "company": {
+        "customer_panel": {
+            "title": "客户信息",
+            "not_configured": "此房间未配置对应的客户信息。",
+            "not_configured_hint": "管理员可在管理后台的「客户面板」中，为该会话配置要打开的页面。"
+        }
+    },
     "composer": {
         "autocomplete": {
             "@room_description": "通知房间全体成员",

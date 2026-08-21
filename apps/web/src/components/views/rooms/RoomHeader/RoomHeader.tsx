@@ -388,24 +388,36 @@ function RoomHeaderButtons({
                 open in every conversation. Pinning it instead (container "top") puts
                 it permanently above the composer and costs timeline height.
 
-                Only rendered when the room actually has a widget, so rooms without
-                one look exactly as upstream does.
+                Always rendered. A room with no provisioned page opens the empty-state
+                card instead, which is text rendered by Element rather than an iframe —
+                see CustomerPanelEmptyCard for why that distinction is a security one
+                and not a styling choice.
             */}
-            {companyPanelWidget && (
-                <Tooltip label={companyPanelWidget.name || _t("common|widget")}>
-                    <IconButton
-                        onClick={(evt) => {
-                            evt.stopPropagation();
+            <Tooltip label={companyPanelWidget?.name || _t("company|customer_panel|title")}>
+                <IconButton
+                    onClick={(evt) => {
+                        evt.stopPropagation();
+                        // A conversation with no provisioned page is a normal state, not a
+                        // missing feature, so the button is unconditional and the panel
+                        // says so in words. Hiding it instead made "this customer has no
+                        // page" and "the client is broken" look identical to the agent,
+                        // and there is no way to tell them apart from the outside.
+                        if (companyPanelWidget) {
                             sdkContext.rightPanelStore.showOrHidePhase(RightPanelPhases.Widget, {
                                 widgetId: companyPanelWidget.id,
                             });
-                        }}
-                        aria-label={companyPanelWidget.name || _t("common|widget")}
-                    >
-                        <ToggleableIcon Icon={ExtensionsIcon} phase={RightPanelPhases.Widget} />
-                    </IconButton>
-                </Tooltip>
-            )}
+                        } else {
+                            sdkContext.rightPanelStore.showOrHidePhase(RightPanelPhases.CustomerPanel);
+                        }
+                    }}
+                    aria-label={companyPanelWidget?.name || _t("company|customer_panel|title")}
+                >
+                    <ToggleableIcon
+                        Icon={ExtensionsIcon}
+                        phase={companyPanelWidget ? RightPanelPhases.Widget : RightPanelPhases.CustomerPanel}
+                    />
+                </IconButton>
+            </Tooltip>
 
             <Tooltip label={_t("right_panel|room_summary_card|title")}>
                 <IconButton

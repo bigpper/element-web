@@ -21,6 +21,20 @@ export enum RightPanelPhases {
     EncryptionPanel = "EncryptionPanel",
     RoomSummary = "RoomSummary",
     Widget = "Widget",
+
+    // COMPANY PATCH: the customer panel's empty state.
+    //
+    // The header button is always present, so an agent never has to wonder whether a
+    // conversation has customer information or whether the client is broken. When no
+    // page is provisioned there is no widget to show, and Widget phase requires a
+    // widgetId — hence a phase of its own rather than an empty WidgetCard.
+    //
+    // It renders text, not an iframe. That is the point: Element sandboxes widgets
+    // with allow-same-origin AND allow-scripts together, so any page we served
+    // ourselves from this origin could read the agent's access token out of
+    // localStorage. A configured panel points at the host company's own domain and is
+    // cross-origin by construction; the unconfigured one must not become an exception.
+    CustomerPanel = "CustomerPanel",
     PinnedMessages = "PinnedMessages",
     Timeline = "Timeline",
     Extensions = "Extensions",
